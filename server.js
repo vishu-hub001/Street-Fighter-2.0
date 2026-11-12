@@ -3,6 +3,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const app = express();
 app.use(express.static('public'));
+app.get('/', (req, res) => res.sendFile(require('path').join(__dirname, 'index.html')));
 const server = http.createServer(app);
 const io = new Server(server);
 const rooms = {}; // code -> { ids:[], info:{id:{char,ready}} }

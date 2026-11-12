@@ -29,12 +29,14 @@ input{background:#1b1530;border:2px solid #7c4dff;color:#fff;padding:12px;border
 <div id="menu" class="screen" style="display:flex">
  <h1>CLASH ARENA</h1><div style="opacity:.8">Online 1v1 fighting · play with a friend</div>
  <button class="btn" id="create">CREATE ROOM</button>
+ <button class="btn alt" id="practice">🤖 PRACTICE VS BOT</button>
  <div class="row"><input id="code" maxlength="4" placeholder="CODE"><button class="btn alt" id="join">JOIN</button></div>
  <div id="msg" style="color:#ff8a80;min-height:22px"></div>
 </div>
 <div id="lobby" class="screen">
  <div>ROOM CODE</div><div id="rc"></div>
  <button class="btn alt" id="share" style="padding:8px 18px;font-size:14px">📤 INVITE FRIEND</button>
+ <div class="row" id="botcfg" style="display:none"><button class="btn alt" id="bch" style="padding:8px 16px;font-size:14px"></button><button class="btn alt" id="blv" style="padding:8px 16px;font-size:14px"></button><button class="btn alt" id="back" style="padding:8px 16px;font-size:14px">← MENU</button></div>
  <div class="row" id="cards"></div>
  <div id="plist" style="line-height:1.6"></div><div id="lmsg" style="color:#ff8a80"></div>
  <button class="btn" id="ready">READY!</button>
@@ -62,19 +64,21 @@ const CH={
   S:{n:'REPULSOR',s:10,a:2,r:28,d:10,proj:{vx:18}}}
 };
 /* ---------- LOBBY / NETWORK ---------- */
+const BOT={on:false,lvl:2,ch:'samurai'};
 const socket=io();let myId,players=[],myPick='wizard',myReady=false,running=false,slot=0;
 socket.on('connect',()=>{myId=socket.id;const q=new URLSearchParams(location.search).get('room');if(q&&!roomCode){$('code').value=q;join(q.toUpperCase())}});
 let roomCode;
 const show=id=>['menu','lobby','over'].forEach(s=>$(s).style.display=s===id?'flex':'none');
-$('create').onclick=()=>{sfx(400);socket.emit('create',enter)};
+$('create').onclick=()=>{BOT.on=false;sfx(400);socket.emit('create',enter)};
 $('join').onclick=()=>join($('code').value.trim().toUpperCase());
-function join(c){socket.emit('join',c,r=>r.err?$('msg').textContent=r.err:enter(r))}
+function join(c){BOT.on=false;socket.emit('join',c,r=>r.err?$('msg').textContent=r.err:enter(r))}
 function enter(r){roomCode=r.code;$('rc').textContent=r.code;show('lobby');history.replaceState(0,'','?room='+r.code);socket.emit('pick',myPick)}
 $('share').onclick=()=>{const u=location.origin+'/?room='+roomCode,t='Fight me in Clash Arena! Room '+roomCode;navigator.share?navigator.share({title:'Clash Arena',text:t,url:u}).catch(()=>{}):navigator.clipboard?.writeText(u).then(()=>$('share').textContent='✅ LINK COPIED')}
 $('cards').innerHTML=Object.entries(CH).map(([k,c])=>`<div class="card" data-k="${k}"><div class="i">${c.ico}</div><b>${c.name}</b><small>${c.desc}</small></div>`).join('');
 document.querySelectorAll('.card').forEach(c=>c.onclick=()=>{myPick=c.dataset.k;myReady=false;socket.emit('pick',myPick);renderLobby()});
-$('ready').onclick=()=>{myReady=!myReady;socket.emit('ready',myReady);if(myReady)fs()};
+$('ready').onclick=()=>{if(BOT.on){fs();startGame(players);return}myReady=!myReady;socket.emit('ready',myReady);if(myReady)fs()};
 function renderLobby(){
+ if(BOT.on)players=[{id:myId,char:myPick,ready:myReady},{id:'bot',char:BOT.ch,ready:true}];
  document.querySelectorAll('.card').forEach(c=>c.classList.toggle('sel',c.dataset.k===myPick));
  $('plist').innerHTML=players.map((p,i)=>`<div>P${i+1}${p.id===myId?' (you)':''}: ${CH[p.char].ico} ${CH[p.char].name} — ${p.ready?'✅ READY':'choosing…'}</div>`).join('')+(players.length<2?'<div>⏳ Waiting for a friend… share the code!</div>':'');
  $('ready').disabled=players.length<2;$('ready').textContent=myReady?'CANCEL':'READY!'}
@@ -83,16 +87,23 @@ socket.on('room',d=>{players=d.players;const m=players.find(p=>p.id===myId);if(m
 socket.on('start',d=>startGame(d.players));
 function fs(){try{document.documentElement.requestFullscreen?.();screen.orientation?.lock?.('landscape').catch(()=>{})}catch(e){}}
 $('again').onclick=()=>{endGame();show('lobby')};
-const send=o=>socket.emit('rel',o);
+const send=o=>{if(!BOT.on)socket.emit('rel',o)};
+$('practice').onclick=()=>{BOT.on=true;myId=myId||'me';myReady=false;sfx(400);
+ $('rc').textContent='PRACTICE';$('share').style.display='none';$('botcfg').style.display='flex';$('lmsg').textContent='';botBtns();renderLobby();show('lobby')};
+const LVN=()=>LV[BOT.lvl].n,chk=Object.keys(CH);
+function botBtns(){$('bch').textContent='BOT: '+CH[BOT.ch].ico+' '+CH[BOT.ch].name;$('blv').textContent='LEVEL: '+LVN()}
+$('bch').onclick=()=>{BOT.ch=chk[(chk.indexOf(BOT.ch)+1)%chk.length];botBtns();renderLobby()};
+$('blv').onclick=()=>{BOT.lvl=(BOT.lvl+1)%LV.length;botBtns()};
+$('back').onclick=()=>{BOT.on=false;$('share').style.display='';$('botcfg').style.display='none';show('menu')};
 /* ---------- STATE ---------- */
 let F=[],me,opp,phase='intro',phaseT=0,rnd=1,score=[0,0],frame=0,shake=0,lastAid=-1,projs=[],sparks=[],texts=[],pc=0;
-const keys={left:0,right:0,up:0,block:0},buf={L:0,H:0,S:0};
+let keys={left:0,right:0,up:0,block:0},buf={L:0,H:0,S:0};
 const mk=(ch,i)=>({ch,x:0,y:0,vy:0,kx:0,tx:0,ty:0,face:i?-1:1,st:'idle',t:0,mv:'',aid:0,hp:CH[ch].hp,gh:1,hs:0});
 function startGame(ps){
- slot=ps.findIndex(p=>p.id===myId);F=ps.map((p,i)=>mk(p.char,i));me=F[slot];opp=F[1-slot];score=[0,0];rnd=1;running=true;
+ slot=ps.findIndex(p=>p.id===myId);F=ps.map((p,i)=>mk(p.char,i));me=F[slot];opp=F[1-slot];score=[0,0];rnd=1;running=true;aiReset();
  $('lobby').style.display='none';$('game').style.display='block';$('ctl').style.display='block';document.body.classList.add('playing');startRound();resize()}
 function endGame(){running=false;$('game').style.display='none';$('ctl').style.display='none';document.body.classList.remove('playing');myReady=false;show('lobby');renderLobby()}
-function startRound(){F.forEach((f,i)=>{f.x=f.tx=i?W-300:300;f.y=f.ty=0;f.vy=f.kx=0;f.hp=CH[f.ch].hp;f.gh=1;f.st='idle';f.t=0;f.face=i?-1:1;f.mv=''});projs=[];lastAid=-1;phase='intro';phaseT=0;$('over').style.display='none'}
+function startRound(){F.forEach((f,i)=>{f.x=f.tx=i?W-300:300;f.y=f.ty=0;f.vy=f.kx=0;f.hp=CH[f.ch].hp;f.gh=1;f.st='idle';f.t=0;f.face=i?-1:1;f.mv=''});projs=[];lastAid=ai.la=-1;phase='intro';phaseT=0;$('over').style.display='none'}
 socket.on('rel',d=>{if(!running)return;
  if(d.k==='st'){if(d.r!==rnd)return;if(d.a!==opp.aid&&d.s==='atk'&&d.mv!=='L')txt(CH[opp.ch][d.mv].n,d.x,G-d.y-150);
   Object.assign(opp,{tx:d.x,ty:d.y,face:d.f,st:d.s,mv:d.mv,t:d.t,aid:d.a,hp:d.h})}
@@ -141,14 +152,55 @@ function upd(){
  if(me.y>0||me.vy>0){me.y+=me.vy;me.vy-=.8;if(me.y<=0){me.y=0;me.vy=0}}
  const dx=me.x-opp.x;if(Math.abs(dx)<46&&Math.abs(me.y-opp.y)<80)me.x+=(dx>=0?1:-1)*Math.min(4,(46-Math.abs(dx))/2);
  me.x=Math.max(40,Math.min(W-40,me.x))}
+function projHit(p){
+ if(p.o!==slot&&phase==='fight'&&me.hp>0&&Math.abs(p.x-me.x)<34&&p.y>me.y-10&&p.y<me.y+115){send({k:'pd',id:p.id});hitMe(p.d,Math.sign(p.vx));return true}
+ return false}
+/* ---------- PRACTICE BOT ---------- */
+const LV=[{n:'Dummy',react:0},{n:'Easy',react:22,blk:.25,cd:70},{n:'Normal',react:12,blk:.55,cd:38},{n:'Hard',react:5,blk:.85,cd:14}];
+const ai={k:{left:0,right:0,up:0,block:0},b:{L:0,H:0,S:0},la:-1,cd:60,sc:0,seen:0,will:0,hold:0};
+function aiReset(){Object.assign(ai,{la:-1,cd:60,sc:0,seen:0,will:0,hold:0})}
+// run fn from the bot's point of view (swaps me/opp/input/slot)
+function asBot(fn){
+ [me,opp]=[opp,me];const s=slot,la=lastAid,k=keys,b=buf;
+ slot=1-s;lastAid=ai.la;keys=ai.k;buf=ai.b;
+ const r=fn();
+ ai.la=lastAid;slot=s;lastAid=la;keys=k;buf=b;[me,opp]=[opp,me];return r}
+function botStep(){asBot(()=>{think();upd();checkHit()});for(const k in ai.b)if(ai.b[k]>0)ai.b[k]--}
+function think(){ // runs as the bot: me=bot, opp=human
+ const L=LV[BOT.lvl],K=keys;K.left=K.right=K.up=K.block=0;
+ if(!L.react||phase!=='fight'||me.hp<=0||['atk','hit','ko'].includes(me.st))return;
+ const c=CH[me.ch],d=Math.abs(opp.x-me.x),tw=opp.x>=me.x?1:-1,gr=me.y<=0;
+ if(ai.cd>0)ai.cd--;if(ai.sc>0)ai.sc--;
+ // defend: incoming melee or projectile
+ const om=opp.st==='atk'&&CH[opp.ch][opp.mv],
+  threat=om&&!om.proj&&d<om.w+50&&opp.t<om.s+om.a,
+  inc=projs.some(p=>p.o!==slot&&(p.vx>0)===(me.x>p.x)&&Math.abs(p.x-me.x)<300);
+ if(threat||inc){if(!ai.seen)ai.will=Math.random()<L.blk;ai.seen++;
+  if(ai.will&&ai.seen>L.react&&gr){K.block=1;ai.hold=10;return}}
+ else{ai.seen=0;if(ai.hold>0){ai.hold--;K.block=1;return}}
+ if(!gr)return;
+ if(opp.st==='hit'&&BOT.lvl===3)ai.cd=Math.min(ai.cd,3);
+ // attack
+ if(ai.cd<=0){
+  const pr=c.S.proj,dash=c.S.dash;let k='';
+  if(pr&&d>230&&ai.sc<=0&&Math.abs(opp.y-me.y)<60){k='S';ai.sc=110}
+  else if(dash&&d>130&&d<200&&ai.sc<=0){k='S';ai.sc=150}
+  else if(d<c.H.w-12&&d<c.L.w+30?Math.random()<.45:d<c.H.w-12)k='H';
+  else if(d<c.L.w-8)k='L';
+  if(k){buf[k]=10;ai.cd=L.cd*(.6+Math.random()*.8);return}}
+ // move: close to poke range, back off if too close
+ const want=c.L.w*.8;
+ if(d>want+10){if(!(c.S.proj&&d>230&&ai.sc<=0&&Math.random()<.6)){tw>0?K.right=1:K.left=1}}
+ else if(d<want-35&&ai.cd>15){tw>0?K.left=1:K.right=1}
+ if(BOT.lvl>=2&&d>150&&Math.random()<.004)K.up=1}
 function step(){
  frame++;phaseT++;
  if(phase==='intro'&&phaseT>110)phase='fight';
  if(phase==='fight'&&(me.hp<=0||opp.hp<=0)){phase='ko';phaseT=0;score[me.hp<=0?1-slot:slot]++;shake=16;sfx(100,.6,'sawtooth',.12)}
  if(phase==='ko'&&phaseT>200){if(score[0]>=2||score[1]>=2){phase='over';$('ot').textContent=score[slot]>score[1-slot]?'YOU WIN! 🏆':'YOU LOSE';$('os').textContent=score[0]+' - '+score[1];$('over').style.display='flex'}else{rnd++;startRound()}}
- upd();opp.x+=(opp.tx-opp.x)*.5;opp.y+=(opp.ty-opp.y)*.5;checkHit();
+ upd();if(BOT.on)botStep();else{opp.x+=(opp.tx-opp.x)*.5;opp.y+=(opp.ty-opp.y)*.5}checkHit();
  projs=projs.filter(p=>{p.x+=p.vx;p.l--;
-  if(p.o!==slot&&phase==='fight'&&me.hp>0&&Math.abs(p.x-me.x)<34&&p.y>me.y-10&&p.y<me.y+115){send({k:'pd',id:p.id});hitMe(p.d,Math.sign(p.vx));return false}
+  if(projHit(p)||(BOT.on&&asBot(()=>projHit(p))))return false;
   return p.l>0&&p.x>-60&&p.x<W+60});
  sparks.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.vy+=.3;p.l--});sparks=sparks.filter(p=>p.l>0);
  texts.forEach(t=>{t.y-=.6;t.l--});texts=texts.filter(t=>t.l>0);
